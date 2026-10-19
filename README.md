@@ -146,10 +146,13 @@ is no authentication in `vtfs` itself.
 
 ```
 vtfs.c        the server
+vtfs_mcp.py   MCP tools over stdio
 p9client.py   host-side 9P client + quiescence loop
 mkfile        9front build
+deploy/       start script for a user profile
 docs/DESIGN.md  internals and the Plan 9 traps
 docs/VM.md      reproducing the serial-console test VM
+docs/DEPLOY.md  installing and registering on a 9front host
 ```
 
 ## License
