@@ -114,6 +114,8 @@ Flags:
 | `terminal_screen` | snapshot the visible screen |
 | `terminal_status` | state, pid, cursor, seq, idle |
 | `terminal_scroll` | tail of scrollback |
+| `terminal_put` | write a text file (8 KiB, text only) |
+| `terminal_get` | read a text file |
 | `terminal_interrupt` | interrupt the foreground child, not the shell |
 | `terminal_clear` | clear the screen |
 | `terminal_resize` | resize the emulated grid |
@@ -143,6 +145,8 @@ is no authentication in `vtfs` itself.
 - `terminal_exec` rejects `&&` and `||`: rc parses `&&` as backgrounding the
   left command, which is worse than a syntax error. Long output is capped at
   256 KiB; check `truncated`.
+- `terminal_put`/`terminal_get` are text-only and capped at 8 KiB per write.
+  Binaries need `hget`, 9P, or a real file server.
 - Programs that insist on opening `/dev/cons` directly will see the machine
   console, not this terminal. stdio-based programs (`rc`, `ls`, `sed`,
   compilers) work.

@@ -154,6 +154,10 @@ Sessions are persistent shells. `cd`, variables, functions and background
 jobs survive between calls. `terminal_new` allocates another session; use it
 if a session reports `state dead`. There is no automatic restart.
 
+For text files, use `terminal_put(session, path, content)` and
+`terminal_get(session, path)`. They are deliberately text-only; use `hget`,
+9P, or a real file server for binaries.
+
 Rules:
 
 1. Use `;` to sequence; never `&&` or `||`.
@@ -165,6 +169,8 @@ Rules:
    nothing is running it does nothing; do not use `kill` on the shell.
 6. Do not run `exit`, `reboot`, `mkfs`, or `rm -rf /` without explicit
    confirmation.
+7. Prefer `terminal_put`/`terminal_get` for text files; do not paste binary
+   data through the terminal.
 
 ## Common failures
 

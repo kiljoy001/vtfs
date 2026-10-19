@@ -298,6 +298,43 @@ def terminal_exec(session: int, command: str, timeout: float = 30.0) -> dict:
         p.close()
 
 
+def _shquote(s):
+    return "'" + s.replace("'", "''") + "'"
+
+
+@mcp.tool()
+def terminal_put(session: int, path: str, content: str,
+                 append: bool = False) -> dict:
+    """Write text to a file on the Plan 9 machine (text only, not binary).
+
+    Content is emitted as a block of echo statements and redirected to path.
+    NUL bytes are rejected; use hget, 9P, or a real file server for binaries.
+    Set append=True to add to an existing file.
+    """
+    if "\x00" in content:
+        return {"status": "rejected", "output": "NUL bytes are not supported",
+                "path": path, "bytes": 0}
+    if len(content.encode()) > 8192:
+        return {"status": "rejected", "output": "content too large (8 KiB max)",
+                "path": path, "bytes": 0}
+    lines = content.splitlines()
+    body = "; ".join("echo " + _shquote(line) for line in lines)
+    cmd = "{ " + body + "; } " + (">>" if append else ">") + " " + _shquote(path)
+    r = terminal_exec(session, cmd)
+    r["path"] = path
+    r["bytes"] = len(content.encode())
+    return r
+
+
+@mcp.tool()
+def terminal_get(session: int, path: str) -> dict:
+    """Read a text file from the Plan 9 machine (text only, not binary)."""
+    r = terminal_exec(session, "cat " + _shquote(path))
+    r["path"] = path
+    r["content"] = r.pop("output")
+    return r
+
+
 @mcp.tool()
 def terminal_interrupt(session: int) -> dict:
     """Interrupt the session's foreground command, not the shell itself."""
