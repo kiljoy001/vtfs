@@ -1,0 +1,13 @@
+#!/bin/rc
+# Install vtfs into $home/bin/$objtype (or the directory given as $1).
+dest=$1
+if(~ $#dest 0)
+	dest=$home/bin/$objtype
+if(! test -d $dest){
+	mkdir $dest
+	if(! test -d $dest)
+		exit mkdir
+}
+cp vtfs $dest/vtfs || exit copy
+chmod +x $dest/vtfs
+ls -l $dest/vtfs

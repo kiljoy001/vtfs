@@ -1,0 +1,5 @@
+#!/bin/rc
+# Build vtfs with the native Plan 9 toolchain.
+6c vtfs.c || exit compile
+6l -o vtfs vtfs.6 /$objtype/lib/lib9p.a || exit link
+echo built ./vtfs
