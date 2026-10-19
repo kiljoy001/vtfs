@@ -318,8 +318,13 @@ def terminal_put(session: int, path: str, content: str,
         return {"status": "rejected", "output": "content too large (8 KiB max)",
                 "path": path, "bytes": 0}
     lines = content.splitlines()
-    body = "; ".join("echo " + _shquote(line) for line in lines)
-    cmd = "{ " + body + "; } " + (">>" if append else ">") + " " + _shquote(path)
+    if not lines:
+        if append:
+            return {"status": "0", "output": "", "path": path, "bytes": 0}
+        cmd = "cp /dev/null " + _shquote(path)
+    else:
+        body = "; ".join("echo " + _shquote(line) for line in lines)
+        cmd = "{ " + body + "; } " + (">>" if append else ">") + " " + _shquote(path)
     r = terminal_exec(session, cmd)
     r["path"] = path
     r["bytes"] = len(content.encode())

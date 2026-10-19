@@ -112,7 +112,7 @@ Flags:
 | `terminal_run` | type a command, wait for quiet, return the screen |
 | `terminal_send` | send raw keystrokes without waiting |
 | `terminal_screen` | snapshot the visible screen |
-| `terminal_status` | state, pid, cursor, seq, idle |
+| `terminal_status` | state, pid, cursor, seq, idle, out |
 | `terminal_scroll` | tail of scrollback |
 | `terminal_put` | write a text file (8 KiB, text only) |
 | `terminal_get` | read a text file |
