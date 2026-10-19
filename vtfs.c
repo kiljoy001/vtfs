@@ -62,6 +62,7 @@ struct Session {
 	int	used;
 	int	state;
 	int	pid;
+	int	wpid;
 	int	in;
 	int	out;
 	int	gen;
@@ -103,6 +104,7 @@ static Session	sess[Maxsess];
 static Srv	fs;
 static QLock	clonelk;
 static int	nextclone;
+static char	*token;
 
 static char *
 statename(int s)
@@ -532,9 +534,48 @@ readerproc(void *v)
 }
 
 static void
+shellwrap(Session *s)
+{
+	int pid, i;
+	Waitmsg *w;
+
+	for(;;){
+		pid = rfork(RFPROC|RFNAMEG|RFFDG|RFNOTEG);
+		if(pid < 0){
+			sleep(100);
+			continue;
+		}
+		if(pid == 0){
+			for(i = 3; i < 64; i++)
+				close(i);
+			execl("/bin/rc", "rc", nil);
+			_exits("exec");
+		}
+		qlock(&s->lk);
+		s->pid = pid;
+		s->state = Running;
+		s->seq++;
+		s->lastout = nsec();
+		qunlock(&s->lk);
+
+		w = wait();
+		if(w != nil)
+			free(w);
+
+		qlock(&s->lk);
+		if(s->pid == pid)
+			s->pid = 0;
+		s->seq++;
+		s->lastout = nsec();
+		qunlock(&s->lk);
+		sleep(50);
+	}
+}
+
+static void
 start(Session *s)
 {
-	int pin[2], pout[2], pid, gen, i;
+	int pin[2], pout[2], wpid, i;
 
 	if(s->state == Running)
 		return;
@@ -543,15 +584,15 @@ start(Session *s)
 		return;
 	}
 
-	gen = ++s->gen;
-	pid = rfork(RFPROC|RFMEM|RFNAMEG|RFFDG|RFNOTEG);
-	if(pid < 0){
+	s->gen++;
+	wpid = rfork(RFPROC|RFMEM|RFNAMEG|RFFDG|RFNOTEG);
+	if(wpid < 0){
 		close(pin[0]); close(pin[1]);
 		close(pout[0]); close(pout[1]);
 		werrstr("rfork: %r");
 		return;
 	}
-	if(pid == 0){
+	if(wpid == 0){
 		close(pin[1]);
 		close(pout[0]);
 		dup(pin[0], 0);
@@ -567,15 +608,16 @@ start(Session *s)
 		putenv("TERM", "vt100");
 		putenv("LINES", "24");
 		putenv("COLUMNS", "80");
-		execl("/bin/rc", "rc", nil);
-		_exits("exec");
+		shellwrap(s);
+		_exits(nil);
 	}
 
 	close(pin[0]);
 	close(pout[1]);
 	s->in = pin[1];
 	s->out = pout[0];
-	s->pid = pid;
+	s->wpid = wpid;
+	s->pid = 0;
 	s->state = Running;
 	s->seq++;
 	s->lastout = nsec();
@@ -701,7 +743,7 @@ fsread(Req *r)
 		id = -1;
 		for(i = 0; i < Maxsess; i++){
 			int k = (nextclone+i) % Maxsess;
-			if(!sess[k].used){
+			if(!sess[k].used && sess[k].state != Dead){
 				sess[k].used = 1;
 				nextclone = (k+1) % Maxsess;
 				id = k;
@@ -866,33 +908,25 @@ ctlwrite(Session *s, char *d, long n)
 
 		qlock(&s->lk);
 		if(strcmp(line, "start") == 0){
-			/* sessions are started before the server forks */
-		}else if(strcmp(line, "reset") == 0){
+			/* the wrapper starts rc automatically */
+		}else if(strcmp(line, "reset") == 0 || strcmp(line, "restart") == 0){
 			if(s->pid > 0)
 				postnote(PNGROUP, s->pid, "kill");
-			if(s->in >= 0)
-				close(s->in);
-			if(s->out >= 0)
-				close(s->out);
-			s->in = s->out = -1;
-			s->pid = 0;
-			s->state = Free;
 			clearall(s);
 		}else if(strcmp(line, "intr") == 0){
 			interruptchildren(s->pid);
 		}else if(strcmp(line, "kill") == 0){
 			if(s->pid > 0)
 				postnote(PNGROUP, s->pid, "kill");
+			if(s->wpid > 0)
+				postnote(PNPROC, s->wpid, "kill");
+			s->pid = 0;
+			s->wpid = 0;
+			s->state = Dead;
+			clearall(s);
 		}else if(strcmp(line, "free") == 0){
 			if(s->pid > 0)
 				postnote(PNGROUP, s->pid, "kill");
-			if(s->in >= 0)
-				close(s->in);
-			if(s->out >= 0)
-				close(s->out);
-			s->in = s->out = -1;
-			s->pid = 0;
-			s->state = Free;
 			s->used = 0;
 			clearall(s);
 		}else if(strcmp(line, "clear") == 0){
@@ -943,11 +977,14 @@ fswrite(Req *r)
 	case RCons:
 	case RInput:
 		qlock(&s->lk);
-		if(s->state == Running){
-			sendinput(s, r->ifcall.data, r->ifcall.count);
-			s->seq++;
-			s->lastout = nsec();
+		if(s->state != Running){
+			qunlock(&s->lk);
+			respond(r, "session not running");
+			return;
 		}
+		sendinput(s, r->ifcall.data, r->ifcall.count);
+		s->seq++;
+		s->lastout = nsec();
 		qunlock(&s->lk);
 		r->ofcall.count = r->ifcall.count;
 		respond(r, nil);
@@ -955,6 +992,17 @@ fswrite(Req *r)
 	}
 
 	respond(r, "not writable");
+}
+
+static void
+fsattach(Req *r)
+{
+	if(token != nil && token[0] != 0
+	&& (r->ifcall.aname == nil || strcmp(r->ifcall.aname, token) != 0)){
+		respond(r, "authentication required");
+		return;
+	}
+	respond(r, nil);
 }
 
 static void
@@ -1014,21 +1062,41 @@ setup(void)
 		start(&sess[i]);
 }
 
+static char *
+readtoken(char *path)
+{
+	int fd, n;
+	char buf[256];
+
+	fd = open(path, OREAD);
+	if(fd < 0)
+		sysfatal("token %s: %r", path);
+	n = read(fd, buf, sizeof buf - 1);
+	close(fd);
+	if(n <= 0)
+		sysfatal("empty token %s", path);
+	buf[n] = 0;
+	while(n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
+		buf[--n] = 0;
+	return estrdup9p(buf);
+}
+
 static void
 usage(void)
 {
-	fprint(2, "usage: %s [-D] [-a addr] [-s srvname] [-m mtpt]\n", argv0);
+	fprint(2, "usage: %s [-D] [-M] [-a addr] [-s srvname] [-m mtpt] [-T tokenfile]\n", argv0);
 	exits("usage");
 }
 
 void
 main(int argc, char **argv)
 {
-	char *srvname, *mtpt, *addr;
+	char *srvname, *mtpt, *addr, *tokenfile;
 
 	srvname = "vt";
 	mtpt = "/mnt/vt";
 	addr = nil;
+	tokenfile = nil;
 
 	ARGBEGIN{
 	case 'D':
@@ -1040,8 +1108,14 @@ main(int argc, char **argv)
 	case 'm':
 		mtpt = EARGF(usage());
 		break;
+	case 'M':
+		mtpt = nil;
+		break;
 	case 'a':
 		addr = EARGF(usage());
+		break;
+	case 'T':
+		tokenfile = EARGF(usage());
 		break;
 	default:
 		usage();
@@ -1050,12 +1124,16 @@ main(int argc, char **argv)
 	if(argc)
 		usage();
 
+	if(tokenfile != nil)
+		token = readtoken(tokenfile);
+
 	setup();
+	fs.attach = fsattach;
 	fs.open = fsopen;
 	fs.read = fsread;
 	fs.write = fswrite;
 
-	if(access(mtpt, AEXIST) < 0){
+	if(mtpt != nil && access(mtpt, AEXIST) < 0){
 		int fd = create(mtpt, OREAD, DMDIR|0777);
 		if(fd >= 0)
 			close(fd);

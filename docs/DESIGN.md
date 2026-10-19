@@ -67,6 +67,27 @@ the raw `cons` stream, and returns the bytes between the two. That gives
 clean output and a real status without screen scraping. The raw ring is
 256 KiB; older bytes are dropped and reported as `truncated`.
 
+## Restart wrapper
+
+`rc` is not run directly. A supervisor process holds the session's stdin and
+stdout pipes, forks `rc`, and waits. When `rc` exits — `exit`, a fatal note,
+or an explicit restart — the supervisor forks a new `rc` on the same pipes.
+The session therefore survives without recreating descriptors, which is
+what a manager process would otherwise have to solve. `terminal_kill` kills
+the supervisor as well; `terminal_restart` kills only the current `rc`.
+
+The supervisor updates the shared `pid` and `seq` fields before and after
+each child, so `status` and `interrupt` always see the current shell.
+
+## Attach token
+
+`-T file` reads a token and makes the `Srv.attach` callback require it as the
+9P attach name (`aname`). The MCP client reads the same token from
+`~/.config/vtfs/token` and sends it in `Tattach`. Plan 9 clients pass it as
+the third argument to `mount`. This is a bearer token: it authenticates the
+attach but does not encrypt traffic, so pair it with a trusted network or a
+VPN/TLS layer.
+
 ## Interrupting the right process
 
 `postnote(PNGROUP, rcpid, ...)` kills the non-interactive shell along with the

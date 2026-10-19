@@ -3,7 +3,12 @@
 if(test -e /srv/vt)
 	exit 0
 
-$home/bin/amd64/vtfs -s vt -m /mnt/vt -a 'tcp!*!5640' &
+if(! test -f $home/lib/vtfs.token){
+	echo 'vtfs: missing $home/lib/vtfs.token' >[1=2]
+	exit missing
+}
+
+$home/bin/amd64/vtfs -s vt -M -a 'tcp!*!5640' -T $home/lib/vtfs.token &
 sleep 1
 
 if(test -e /srv/vt)

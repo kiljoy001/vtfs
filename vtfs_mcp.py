@@ -353,6 +353,30 @@ def terminal_interrupt(session: int) -> dict:
 
 
 @mcp.tool()
+def terminal_restart(session: int) -> dict:
+    """Restart the session's rc shell. The session and its pipes survive."""
+    p = _conn()
+    try:
+        p.writefile(f"/{session}/ctl", b"restart\n")
+        time.sleep(0.2)
+        return _status(p, session)
+    finally:
+        p.close()
+
+
+@mcp.tool()
+def terminal_kill(session: int) -> dict:
+    """Stop a session permanently (kills the shell and its wrapper)."""
+    p = _conn()
+    try:
+        p.writefile(f"/{session}/ctl", b"kill\n")
+        time.sleep(0.2)
+        return _status(p, session)
+    finally:
+        p.close()
+
+
+@mcp.tool()
 def terminal_clear(session: int) -> str:
     """Clear the terminal screen."""
     p = _conn()

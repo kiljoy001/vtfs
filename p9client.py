@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Minimal 9P2000 client for vtfs: walk, open, read, write, clunk."""
-import socket, struct, time, sys
+import socket, struct, time, sys, os
 
 Tversion, Rversion = 100, 101
 Tauth, Rauth = 102, 103
@@ -29,13 +29,25 @@ def D(b, o=0):
     return b[o+2:o+2+n], o+2+n
 
 class P9:
-    def __init__(self, host='127.0.0.1', port=15640, uname='glenda', msize=8192):
+    def __init__(self, host='127.0.0.1', port=15640, uname='glenda', msize=8192,
+                 aname=None):
         self.s = socket.create_connection((host, port), timeout=5)
         self.msize = msize
         self.tag = 1
         self.fid = 1
+        if aname is None:
+            aname = os.environ.get("VTFS_TOKEN", "")
+            if not aname:
+                path = os.environ.get("VTFS_TOKEN_FILE",
+                                      os.path.expanduser("~/.config/vtfs/token"))
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        aname = f.read().strip()
+                except OSError:
+                    aname = ""
+        self.aname = aname
         self.rpc(Tversion, struct.pack('<I', msize) + S('9P2000'), tag=0xffff)
-        self.rpc(Tattach, struct.pack('<II', 0, NOFID) + S(uname) + S(''), fid=0)
+        self.rpc(Tattach, struct.pack('<II', 0, NOFID) + S(uname) + S(aname), fid=0)
 
     def rpc(self, typ, payload, tag=None, fid=None, expect=None):
         if tag is None:

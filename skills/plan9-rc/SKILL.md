@@ -151,8 +151,10 @@ interactive program; it returns the 24x80 screen including old output.
 interrupts the foreground command without killing the shell.
 
 Sessions are persistent shells. `cd`, variables, functions and background
-jobs survive between calls. `terminal_new` allocates another session; use it
-if a session reports `state dead`. There is no automatic restart.
+jobs survive between calls. `rc` is supervised and restarts automatically
+after `exit`; `terminal_restart` forces a restart, and `terminal_kill` stops
+one permanently. `terminal_new` allocates another session; use it if a
+session reports `state dead`.
 
 For text files, use `terminal_put(session, path, content)` and
 `terminal_get(session, path)`. They are deliberately text-only; use `hget`,

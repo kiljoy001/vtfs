@@ -95,10 +95,33 @@ Flags:
 
 ```
 -D            lib9p request tracing
+-M            do not mount locally (post /srv only)
 -s name       /srv name (default vt)
 -m mtpt       mountpoint (default /mnt/vt)
 -a addr       also listen for 9P, e.g. 'tcp!*!5640'
+-T tokenfile  require this token as the 9P attach aname
 ```
+
+### Authenticated listener
+
+Generate a token once and keep it mode 600 on both sides:
+
+```sh
+openssl rand -hex 24 > ~/.config/vtfs/token
+```
+
+On 9front:
+
+```rc
+vtfs -M -s vt -a 'tcp!*!5640' -T $home/lib/vtfs.token &
+
+# a local client must pass the token as the 9P attach name:
+mount /srv/vt /mnt/vt `{cat $home/lib/vtfs.token}
+```
+
+The MCP client reads `~/.config/vtfs/token` (or `VTFS_TOKEN`, or
+`VTFS_TOKEN_FILE`) and sends it automatically. The token authenticates the
+attach; it does not encrypt the stream.
 
 ## MCP server
 
@@ -112,6 +135,8 @@ Flags:
 | `terminal_run` | type a command, wait for quiet, return the screen |
 | `terminal_send` | send raw keystrokes without waiting |
 | `terminal_screen` | snapshot the visible screen |
+| `terminal_restart` | restart the rc shell in place |
+| `terminal_kill` | stop a session permanently |
 | `terminal_status` | state, pid, cursor, seq, idle, out |
 | `terminal_scroll` | tail of scrollback |
 | `terminal_put` | write a text file (8 KiB, text only) |
@@ -133,15 +158,14 @@ for embedding the quiescence loop:
 python3 p9client.py 1 'ls /sys/src | sed 5q'
 ```
 
-On a real deployment put `tlssrv`/`factotum` in front of the listener; there
-is no authentication in `vtfs` itself.
+The listener is token-gated at attach, but the token and traffic are not
+encrypted. Use a trusted LAN, a VPN, or TLS termination for untrusted links.
 
 ## Limitations
 
-- Sessions are started before the server forks and cannot be restarted
-  in place. `terminal_interrupt` now targets the foreground child, so the
-  usual cause of a dead shell is gone; use `terminal_new` if one dies. A
-  session-manager process is the next step.
+- Sessions restart in place. A supervisor wraps `rc` and re-execs it when
+  it exits; `terminal_restart` forces a restart, and `terminal_kill` stops
+  one permanently. `terminal_new` allocates another session.
 - `terminal_exec` rejects `&&` and `||`: rc parses `&&` as backgrounding the
   left command, which is worse than a syntax error. Long output is capped at
   256 KiB; check `truncated`.
@@ -152,9 +176,9 @@ is no authentication in `vtfs` itself.
   compilers) work.
 - The VT parser covers the common subset: cursor motion, erase, insert /
   delete, scroll, SGR ignored, OSC ignored. It is not a complete xterm.
-- The TCP listener works with Plan 9's own client; QEMU user-mode
-  `hostfwd` was observed to reset connections after attach. Use a tap or
-  bridged interface, or run the bridge inside the guest.
+- In the QEMU test VM, user-mode `hostfwd` was observed to reset connections
+  after attach; use a tap/bridged interface there. The physical dev9p host
+  works directly.
 
 ## Layout
 
