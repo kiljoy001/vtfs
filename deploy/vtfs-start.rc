@@ -1,0 +1,12 @@
+#!/bin/rc
+# Start vtfs if it is not already posted. Safe to source from profile.
+if(test -e /srv/vt)
+	exit 0
+
+$home/bin/amd64/vtfs -s vt -m /mnt/vt -a 'tcp!*!5640' &
+sleep 1
+
+if(test -e /srv/vt)
+	echo vtfs started
+if not
+	echo vtfs failed to start >[1=2]

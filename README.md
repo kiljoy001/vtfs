@@ -94,18 +94,38 @@ Flags:
 -a addr       also listen for 9P, e.g. 'tcp!*!5640'
 ```
 
-## Host-side bridge
+## MCP server
 
-`p9client.py` is a minimal 9P2000 client that walks, opens, reads and writes
-the tree, plus the quiescence loop. It is the piece an MCP server wraps:
+`vtfs_mcp.py` exposes the terminal as MCP tools:
+
+| tool | purpose |
+|---|---|
+| `terminal_new` | allocate a session |
+| `terminal_list` | show sessions and state |
+| `terminal_run` | type a command, wait for quiet, return the screen |
+| `terminal_send` | send raw keystrokes without waiting |
+| `terminal_screen` | snapshot the visible screen |
+| `terminal_status` | state, pid, cursor, seq, idle |
+| `terminal_scroll` | tail of scrollback |
+| `terminal_interrupt` | interrupt the process group |
+| `terminal_clear` | clear the screen |
+| `terminal_resize` | resize the emulated grid |
+
+It is a 9P client, not a shell wrapper. Point it at a listener with:
+
+```sh
+VTFS_ADDR=dev9p:5640 python3 vtfs_mcp.py
+```
+
+`p9client.py` is the same client without MCP; it is useful for testing and
+for embedding the quiescence loop:
 
 ```sh
 python3 p9client.py 1 'ls /sys/src | sed 5q'
 ```
 
-It speaks to a `vtfs -a` listener, or to any 9P transport that exposes the
-tree. On a real deployment put `tlssrv`/`factotum` in front of the listener;
-there is no authentication in `vtfs` itself.
+On a real deployment put `tlssrv`/`factotum` in front of the listener; there
+is no authentication in `vtfs` itself.
 
 ## Limitations
 

@@ -52,6 +52,12 @@ class P9:
             raise OSError(f"9P: expected {expect}, got {rtyp}")
         return body
 
+    def close(self):
+        try:
+            self.s.close()
+        except Exception:
+            pass
+
     def recvn(self, n):
         b = b''
         while len(b) < n:
