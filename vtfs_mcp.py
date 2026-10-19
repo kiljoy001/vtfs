@@ -125,6 +125,10 @@ def terminal_run(session: int, command: str, timeout: float = 15.0,
     waits until output has been quiet for quiet_ms, or timeout seconds. State
     (cwd, environment, functions, background jobs) persists between calls.
     Use terminal_send for interactive prompts that do not end in a newline.
+
+    The shell is Plan 9 rc, not POSIX sh: use ';' not '&&', '$status' not
+    '$?', and rc quoting ('single quotes'; '' for a literal quote). There is
+    no exit-status field; append '; echo STATUS $status' if you need one.
     """
     p = _conn()
     try:
@@ -143,6 +147,7 @@ def terminal_send(session: int, text: str, enter: bool = True) -> str:
 
     Useful for prompts, password entry, editors, and programs that expect
     keystrokes rather than a command line. Set enter=False to send no newline.
+    The shell is Plan 9 rc, not POSIX sh (use ';' not '&&').
     """
     p = _conn()
     try:
