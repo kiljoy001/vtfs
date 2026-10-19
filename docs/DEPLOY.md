@@ -85,4 +85,17 @@ python3 /home/scott/Repo/vtfs/p9client.py 1 'echo hello'         # plain 9P
 ```
 
 A healthy session answers `terminal_status` with `state running`, a `pid`,
-and a `seq` that changes when output is produced.
+and a `seq` that changes when output is produced. `terminal_exec` returns
+`{"status": "0", "output": ...}` on success.
+
+## Skill
+
+`skills/plan9-rc/SKILL.md` is an agent skill covering rc syntax, vtfs, and the
+common bash-to-rc failures. Copy it into each harness's skills directory:
+
+```sh
+for d in ~/.claude/skills ~/.codex/skills ~/.gemini/skills ~/.gemini/antigravity/skills; do
+  mkdir -p "$d/plan9-rc"
+  cp skills/plan9-rc/SKILL.md "$d/plan9-rc/SKILL.md"
+done
+```

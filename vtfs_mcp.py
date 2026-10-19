@@ -10,6 +10,8 @@ import os
 import sys
 import time
 import logging
+import re
+import secrets
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,6 +23,8 @@ log = logging.getLogger("vtfs-mcp")
 
 mcp = FastMCP("vtfs")
 DEFAULT_ADDR = os.environ.get("VTFS_ADDR", "dev9p:5640")
+RAWMAX = 256 * 1024
+ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
 def _addr():
@@ -29,6 +33,32 @@ def _addr():
         a = a[4:]
     host, _, port = a.partition(":")
     return (host or "dev9p"), int(port or 5640)
+
+
+def _rc_guard(command):
+    """Reject && and || outside quotes; rc parses them as background/pipe."""
+    q = False
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c == "'":
+            if q and i + 1 < len(command) and command[i + 1] == "'":
+                i += 2
+                continue
+            q = not q
+            i += 1
+            continue
+        if not q and command[i:i + 2] in ("&&", "||"):
+            return ("Plan 9 rc does not support && or ||. "
+                    "Use ';' to sequence commands, or 'if(cmd)' to test status. "
+                    "(rc reads && as backgrounding the left command.)")
+        i += 1
+    return None
+
+
+def _rejected(session, why):
+    return {"session": session, "status": "rejected", "output": why,
+            "timed_out": False, "truncated": False, "state": "rejected"}
 
 
 def _conn():
@@ -130,6 +160,10 @@ def terminal_run(session: int, command: str, timeout: float = 15.0,
     '$?', and rc quoting ('single quotes'; '' for a literal quote). There is
     no exit-status field; append '; echo STATUS $status' if you need one.
     """
+    why = _rc_guard(command)
+    if why:
+        return f"[rejected] {why}"
+
     p = _conn()
     try:
         if not command.endswith("\n"):
@@ -193,12 +227,85 @@ def terminal_scroll(session: int, lines: int = 40) -> str:
 
 
 @mcp.tool()
-def terminal_interrupt(session: int) -> str:
-    """Send an interrupt to the session's process group."""
+def terminal_exec(session: int, command: str, timeout: float = 30.0) -> dict:
+    """Run a command and return its clean output and rc $status.
+
+    Unlike terminal_run, this reads the raw output stream, so the result is
+    just what the command wrote (ANSI escapes stripped), not a 24x80 screen
+    snapshot. A marker line after the command carries rc's $status. The
+    shell is Plan 9 rc: use ';' not '&&', '$status' not '$?'.
+
+    Output is capped at 256 KiB; check the 'truncated' field. Background
+    commands (ending in '&') return immediately and their later output is
+    not included. Use terminal_screen or terminal_scroll to inspect.
+    """
+    why = _rc_guard(command)
+    if why:
+        return _rejected(session, why)
+
+    p = _conn()
+    try:
+        st0 = _status(p, session)
+        out0 = int(st0.get("out", "0"))
+        marker = "__VTFS_" + secrets.token_hex(6) + "__"
+        p.writefile(f"/{session}/input", (command.rstrip("\n") + "\n").encode())
+        p.writefile(f"/{session}/input", f"echo {marker} $status\n".encode())
+
+        deadline = time.time() + timeout
+        found = False
+        st = st0
+        while time.time() < deadline:
+            st = _status(p, session)
+            out = int(st.get("out", "0"))
+            if out > out0:
+                start = max(out0, out - 65536)
+                tail = p.read_range(f"/{session}/cons", start, out - start)
+                if marker.encode() in tail:
+                    found = True
+                    break
+            if st.get("state") == "dead":
+                break
+            time.sleep(0.05)
+
+        st = _status(p, session)
+        out = int(st.get("out", "0"))
+        avail = max(0, out - out0)
+        truncated = avail > RAWMAX
+        start = max(out0, out - RAWMAX) if truncated else out0
+        data = p.read_range(f"/{session}/cons", start, max(0, out - start))
+        text = ANSI.sub("", data.decode("utf-8", "replace"))
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+        idx = text.rfind(marker)
+        if idx >= 0:
+            status = text[idx + len(marker):].split("\n", 1)[0].strip()
+            if status == "":
+                status = "0"  # rc uses an empty string for success
+            output = text[:idx].rstrip("\n")
+        else:
+            status = "dead" if st.get("state") == "dead" else "unknown"
+            output = text.rstrip("\n")
+
+        return {
+            "session": session,
+            "status": status,
+            "output": output,
+            "timed_out": (not found) and st.get("state") != "dead",
+            "truncated": truncated,
+            "state": st.get("state"),
+        }
+    finally:
+        p.close()
+
+
+@mcp.tool()
+def terminal_interrupt(session: int) -> dict:
+    """Interrupt the session's foreground command, not the shell itself."""
     p = _conn()
     try:
         p.writefile(f"/{session}/ctl", b"intr\n")
-        return f"interrupted session {session}"
+        time.sleep(0.15)
+        return _status(p, session)
     finally:
         p.close()
 

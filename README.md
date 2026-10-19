@@ -55,6 +55,12 @@ A client writes a command, then polls `status` until `seq` has stopped
 changing and `idle` exceeds a threshold (default 120 ms), then reads
 `screen`. That is the whole contract. `p9client.py` implements it.
 
+`terminal_exec` takes the cleaner path: it records the raw byte offset
+(`out` in `status`), appends a marker line carrying `$status`, and reads the
+raw stream from that offset. The result is command output, not a screen
+snapshot, and success is normalized to `"0"`. rc's empty success string is
+the reason for that normalization.
+
 ## Build
 
 On 9front amd64:
@@ -102,12 +108,13 @@ Flags:
 |---|---|
 | `terminal_new` | allocate a session |
 | `terminal_list` | show sessions and state |
+| `terminal_exec` | run a command, return clean output and `$status` |
 | `terminal_run` | type a command, wait for quiet, return the screen |
 | `terminal_send` | send raw keystrokes without waiting |
 | `terminal_screen` | snapshot the visible screen |
 | `terminal_status` | state, pid, cursor, seq, idle |
 | `terminal_scroll` | tail of scrollback |
-| `terminal_interrupt` | interrupt the process group |
+| `terminal_interrupt` | interrupt the foreground child, not the shell |
 | `terminal_clear` | clear the screen |
 | `terminal_resize` | resize the emulated grid |
 
@@ -129,10 +136,13 @@ is no authentication in `vtfs` itself.
 
 ## Limitations
 
-- The child is plain `rc`, so `intr` terminates the shell rather than
-  returning to a prompt. Giving `rc` a private `/dev/cons` is the fix.
 - Sessions are started before the server forks and cannot be restarted
-  in place. A session-manager process is the next step.
+  in place. `terminal_interrupt` now targets the foreground child, so the
+  usual cause of a dead shell is gone; use `terminal_new` if one dies. A
+  session-manager process is the next step.
+- `terminal_exec` rejects `&&` and `||`: rc parses `&&` as backgrounding the
+  left command, which is worse than a syntax error. Long output is capped at
+  256 KiB; check `truncated`.
 - Programs that insist on opening `/dev/cons` directly will see the machine
   console, not this terminal. stdio-based programs (`rc`, `ls`, `sed`,
   compilers) work.
@@ -153,6 +163,7 @@ deploy/       start script for a user profile
 docs/DESIGN.md  internals and the Plan 9 traps
 docs/VM.md      reproducing the serial-console test VM
 docs/DEPLOY.md  installing and registering on a 9front host
+skills/plan9-rc  rc + vtfs skill for agent harnesses
 ```
 
 ## License

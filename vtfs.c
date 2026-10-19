@@ -26,7 +26,7 @@ enum {
 	Rows		= 24,
 	Cols		= 80,
 	Scrolllines	= 100,
-	Rawbuf		= 32*1024,
+	Rawbuf		= 256*1024,
 };
 
 enum {
@@ -741,10 +741,11 @@ fsread(Req *r)
 		idle = s->lastout ? (nsec() - s->lastout)/1000000 : -1;
 		n = snprint(statbuf, sizeof statbuf,
 			"state %s\npid %d\nrows %d\ncols %d\n"
-			"cursor %d %d\nseq %lud\nidle %lld\n"
+			"cursor %d %d\nseq %lud\nidle %lld\nout %llud\n"
 			"quiet %d\ntimeout %d\n",
 			statename(s->state), s->pid, s->rows, s->cols,
-			s->cy, s->cx, s->seq, idle, s->quiet, s->timeout);
+			s->cy, s->cx, s->seq, idle, s->rawtotal,
+			s->quiet, s->timeout);
 		qunlock(&s->lk);
 		reply(r, statbuf, n);
 		return;
@@ -761,6 +762,8 @@ fsread(Req *r)
 	respond(r, "not readable");
 }
 
+static int interruptchildren(int);
+
 static void
 sendinput(Session *s, char *d, long n)
 {
@@ -771,8 +774,7 @@ sendinput(Session *s, char *d, long n)
 	m = 0;
 	for(i = 0; i < n; i++){
 		if(d[i] == 3){
-			if(s->pid > 0)
-				postnote(PNGROUP, s->pid, "interrupt");
+			interruptchildren(s->pid);
 			continue;
 		}
 		if(d[i] == '\r'){
@@ -804,6 +806,44 @@ sendinput(Session *s, char *d, long n)
 		if(s->echo)
 			feed(s, (uchar*)buf, m, 0);
 	}
+}
+
+static int
+interruptchildren(int ppid)
+{
+	Dir *d;
+	int fd, n, i, f, m, child, count;
+	char path[64], buf[64];
+
+	count = 0;
+	if(ppid <= 0)
+		return 0;
+	fd = open("/proc", OREAD);
+	if(fd < 0)
+		return 0;
+	while((n = dirread(fd, &d)) > 0){
+		for(i = 0; i < n; i++){
+			child = atoi(d[i].name);
+			if(child <= 0)
+				continue;
+			snprint(path, sizeof path, "/proc/%d/ppid", child);
+			f = open(path, OREAD);
+			if(f < 0)
+				continue;
+			m = read(f, buf, sizeof buf - 1);
+			close(f);
+			if(m <= 0)
+				continue;
+			buf[m] = 0;
+			if(atoi(buf) == ppid){
+				postnote(PNPROC, child, "interrupt");
+				count++;
+			}
+		}
+		free(d);
+	}
+	close(fd);
+	return count;
 }
 
 static void
@@ -839,8 +879,7 @@ ctlwrite(Session *s, char *d, long n)
 			s->state = Free;
 			clearall(s);
 		}else if(strcmp(line, "intr") == 0){
-			if(s->pid > 0)
-				postnote(PNGROUP, s->pid, "interrupt");
+			interruptchildren(s->pid);
 		}else if(strcmp(line, "kill") == 0){
 			if(s->pid > 0)
 				postnote(PNGROUP, s->pid, "kill");

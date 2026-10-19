@@ -87,6 +87,21 @@ class P9:
         n = struct.unpack_from('<I', body)[0]
         return body[4:4+n]
 
+    def read_range(self, path, off, count):
+        """Read up to count bytes from an absolute offset."""
+        f = self.walk(0, path)
+        try:
+            self.open(f, OREAD)
+            out = b""
+            while len(out) < count:
+                d = self.read(f, off + len(out), min(8192, count - len(out)))
+                if not d:
+                    break
+                out += d
+            return out
+        finally:
+            self.clunk(f)
+
     def write(self, fid, data, off=0):
         body = self.rpc(Twrite, struct.pack('<IQI', fid, off, len(data)) + data, expect=Rwrite)
         return struct.unpack_from('<I', body)[0]

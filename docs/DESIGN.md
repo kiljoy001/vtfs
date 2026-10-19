@@ -60,6 +60,21 @@ stall `ctl` on the same connection. Instead:
 
 This also keeps the server's request latency bounded.
 
+For non-interactive work, `terminal_exec` does better: `status` exposes
+`out`, the monotonic count of raw output bytes. The client records `out`,
+runs the command followed by `echo MARKER $status`, waits for the marker in
+the raw `cons` stream, and returns the bytes between the two. That gives
+clean output and a real status without screen scraping. The raw ring is
+256 KiB; older bytes are dropped and reported as `truncated`.
+
+## Interrupting the right process
+
+`postnote(PNGROUP, rcpid, ...)` kills the non-interactive shell along with the
+command. `intr` instead scans `/proc/*/ppid` for direct children of the
+session's `rc` and sends `interrupt` to each with `postnote(PNPROC, ...)`.
+Pipelines are covered because every child is hit. If no child is running,
+nothing happens and the shell survives.
+
 ## Terminal parser
 
 The parser is a small state machine over runes:
